@@ -36,6 +36,12 @@
 DECLARE_GLOBAL_DATA_PTR;
 #undef DEBUG
 
+#ifdef MT_HAS_16M_FLASH
+unsigned int flash_base = 0;
+#else
+unsigned int flash_base = 0x1000000;
+#endif
+
 #define SDRAM_CFG1_REG RALINK_SYSCTL_BASE + 0x0304
 
 int modifies= 0;
@@ -300,7 +306,10 @@ static void Init_System_Mode(void)
 		mips_cpu_feq = ((RALINK_REG(RALINK_SYSCTL_BASE+0x10)>>6)&0x1) ? (40*1000*1000)/CPU_FRAC_DIV \
 					   : (25*1000*1000)/CPU_FRAC_DIV;
 	}else {
-		mips_cpu_feq = (575*1000*1000)/CPU_FRAC_DIV;
+		if ((RALINK_REG(RALINK_SYSCTL_BASE+0x10)>>6)&0x1)
+			mips_cpu_feq = (580*1000*1000)/CPU_FRAC_DIV;
+		else
+			mips_cpu_feq = (575*1000*1000)/CPU_FRAC_DIV;
 	}
 	mips_bus_feq = mips_cpu_feq/3;
 #elif defined(MT7621_ASIC_BOARD)
@@ -1286,6 +1295,29 @@ int check_image_validation(void)
 }
 #endif
 
+#define GPIOMODE	0x60
+#define GPIOMODE2	0x64
+
+#define PIO_DIR0	0x00
+#define PIO_DIR1	0x04
+#define PIO_DATA1	0x24
+#define PIO_SET1	0x34
+#define PIO_CLEAR0	0x40
+#define PIO_CLEAR1	0x44
+
+static int smart7688_led_state;
+
+void smart7688_led_blink(void)
+{
+	if (smart7688_led_state) {
+		RALINK_REG(RALINK_PIO_BASE+PIO_SET1) |= (1 << 12);
+		smart7688_led_state = 0;
+	} else {
+		RALINK_REG(RALINK_PIO_BASE+PIO_CLEAR1) |= (1 << 12);
+		smart7688_led_state = 1;
+	}
+}
+
 
 /************************************************************************
  *
@@ -1960,8 +1992,88 @@ __attribute__((nomips16)) void board_init_r (gd_t *id, ulong dest_addr)
 	    s = getenv ("bootdelay");
 	    timer1 = s ? (int)simple_strtol(s, NULL, 10) : CONFIG_BOOTDELAY;
 	}
+	u32 g;
 
-	OperationSelect();   
+	// BOOTSTRAP
+	// set GPIO11 to output
+	RALINK_REG(RALINK_PIO_BASE+PIO_DIR0) |= (0x1 << 11);
+	// clear GPIO11
+	RALINK_REG(RALINK_PIO_BASE+PIO_CLEAR0) |= (0x1 << 11);
+
+	// ARDUINO
+	// set GPIO3/14/15/16/17 to input
+	g = RALINK_REG(RALINK_PIO_BASE+PIO_DIR0);
+	g &= ~((1 << 3) | (1 << 14) | (1 << 15) | (1 << 16) | (1 << 17));
+	RALINK_REG(RALINK_PIO_BASE+PIO_DIR0) = g;
+
+	// EPHY
+	// set GPIO43 to normal led mode
+	g = RALINK_REG(RALINK_SYSCTL_BASE+GPIOMODE2);
+	g &= ~(0x3 << 2);
+	RALINK_REG(RALINK_SYSCTL_BASE+GPIOMODE2) = g;
+
+	// LED
+	// set GPIO44 to normal gpio
+	RALINK_REG(RALINK_SYSCTL_BASE+GPIOMODE2) |= 0x1;
+	// set GPIO44 to output
+	RALINK_REG(RALINK_PIO_BASE+PIO_DIR1) |= (1 << 12);
+	// set /GPIO44
+	RALINK_REG(RALINK_PIO_BASE+PIO_SET1) |= (1 << 12);
+
+	// BUTTON
+	// set GPIO38 to normal gpio
+	RALINK_REG(RALINK_SYSCTL_BASE+GPIOMODE) |= (1 << 14);
+	// set GPIO38 to input
+	g = RALINK_REG(RALINK_PIO_BASE+PIO_DIR1);
+	g &= ~(1 << 6);
+	RALINK_REG(RALINK_PIO_BASE+PIO_DIR1) = g;
+	// check if GPIO38 is set
+	reg = RALINK_REG(RALINK_PIO_BASE+PIO_DATA1);
+
+
+	printf("\nGPIOMODE --> %x\n", RALINK_REG(RALINK_SYSCTL_BASE+GPIOMODE));
+	printf("\nGPIOMODE2 --> %x\n", RALINK_REG(RALINK_SYSCTL_BASE+GPIOMODE2));
+
+	reg &= (1 << 6);
+	if (!reg) {
+		RALINK_REG(RALINK_PIO_BASE+PIO_CLEAR1) |= (1 << 12);
+		printf("\n\nRESET BUTTON PRESSED\n");
+		timer1 = 0;
+		while (!(RALINK_REG(RALINK_PIO_BASE+PIO_DATA1) & (1 << 6)))
+		{
+			for (i=0; i<100; ++i)
+				udelay (10000);
+			timer1++;
+			if (timer1 == 3)
+				RALINK_REG(RALINK_PIO_BASE+PIO_SET1) |= (1 << 12);
+			if (timer1 == 20)
+				RALINK_REG(RALINK_PIO_BASE+PIO_CLEAR1) |= (1 << 12);
+		}
+		printf("button pressed for %d s\n", timer1);
+
+		if (timer1 < 3) {
+			timer1= CONFIG_BOOTDELAY;
+			BootType = 'c';
+		} else if (timer1 < 18) {
+			BootType = '5';
+			timer1 = 0;
+		} else {
+			BootType = 'b';
+			timer1 = 0;
+		}
+	} else {
+		unsigned char mfg_mac[6] = { 0x00, 0x0c, 0x43, 0xe1, 0x76, 0x28 };
+		raspi_read((char *) CFG_LOAD_ADDR, 0x40004, 6);
+
+		if (!memcmp((void *) CFG_LOAD_ADDR, mfg_mac, 6)) {
+			BootType = 'm';
+			printf("mfg mac detected\n");
+		}
+	}
+
+	RALINK_REG(RALINK_PIO_BASE+PIO_SET1) |= (1 << 12);
+
+	OperationSelect();
 	while (timer1 > 0) {
 		--timer1;
 		/* delay 100 * 10ms */
@@ -1969,7 +2081,7 @@ __attribute__((nomips16)) void board_init_r (gd_t *id, ulong dest_addr)
 			if ((my_tmp = tstc()) != 0) {	/* we got a key press	*/
 				timer1 = 0;	/* no more delay	*/
 				BootType = getc();
-				if ((BootType < '0' || BootType > '5') && (BootType != '7') && (BootType != '8') && (BootType != '9'))
+				if ((BootType < '0' || BootType > '5') && (BootType != '7') && (BootType != '8') && (BootType != '9') && (BootType != 'b') && (BootType != 'm') && (BootType != 'c'))
 					BootType = '3';
 				printf("\n\rYou choosed %c\n\n", BootType);
 				break;
@@ -1981,7 +2093,7 @@ __attribute__((nomips16)) void board_init_r (gd_t *id, ulong dest_addr)
 	putc ('\n');
 
 	// Roger debug
-	{
+	if (0) {
 		int i;
 		u_long reg;
 
@@ -2019,6 +2131,17 @@ __attribute__((nomips16)) void board_init_r (gd_t *id, ulong dest_addr)
 #endif
 
 		switch(BootType) {
+
+
+		case 'm':
+			printf("   \n   MFG System Load Linux to SDRAM via TFTP. \n");
+			argc= 3;
+			argv[1] = "0x80A00000";
+			strncpy(argv[2], "root_uImage", ARGV_LEN);
+			setenv("autostart", "yes");
+			do_tftpb(cmdtp, 0, argc, argv);
+			break;
+
 		case '1':
 			printf("   \n%d: System Load Linux to SDRAM via TFTP. \n", SEL_LOAD_LINUX_SDRAM);
 			tftp_config(SEL_LOAD_LINUX_SDRAM, argv);           
@@ -2273,19 +2396,136 @@ __attribute__((nomips16)) void board_init_r (gd_t *id, ulong dest_addr)
 			argv[2] = "0";
 			sprintf(addr_str, "0x%X", CFG_LOAD_ADDR);
 			argv[3] = &addr_str[0];
-			argv[4] = "root_uImage";
+			argv[4] = "lks7688.img";
 			setenv("autostart", "no");
 			if(do_fat_fsload(cmdtp, 0, argc, argv)){
-				printf("Upgrade F/W from USB storage failed.\n");
+				printf("Could not find lks7688.img\n");
+			} else {
+				NetBootFileXferSize=simple_strtoul(getenv("filesize"), NULL, 16);
+				if (NetBootFileXferSize > 0xfb0000 + flash_base) {
+					printf("lks7688.img is too big\n");
+				} else {
+					printf("writing lks7688.img to flash\n");
+					raspi_erase_write((char *)CFG_LOAD_ADDR, CFG_KERN_ADDR-CFG_FLASH_BASE, NetBootFileXferSize);
+				}
+			}
+
+
+			//reset            
+			do_reset(cmdtp, 0, argc, argv);
+			break;
+
+		case 'c':
+			printf("\n%d: System Load Linux then write to Flash via USB Storage. \n", 5);
+
+			argc = 2;
+			argv[1] = "start";
+			do_usb(cmdtp, 0, argc, argv);
+			if( usb_stor_curr_dev < 0){
+				printf("No USB Storage found. Upgrade F/W failed.\n");
 				break;
 			}
 
-			NetBootFileXferSize=simple_strtoul(getenv("filesize"), NULL, 16);
-#if defined (CFG_ENV_IS_IN_NAND)
-			ranand_erase_write((char *)CFG_LOAD_ADDR, CFG_KERN_ADDR-CFG_FLASH_BASE, NetBootFileXferSize);
-#elif defined (CFG_ENV_IS_IN_SPI)
-			raspi_erase_write((char *)CFG_LOAD_ADDR, CFG_KERN_ADDR-CFG_FLASH_BASE, NetBootFileXferSize);
-#endif //CFG_ENV_IS_IN_FLASH
+			argc= 5;
+			argv[1] = "usb";
+			argv[2] = "0";
+			sprintf(addr_str, "0x%X", CFG_LOAD_ADDR);
+			argv[3] = &addr_str[0];
+			argv[4] = "lks7688.cfg";
+			setenv("autostart", "no");
+			memset(CFG_LOAD_ADDR, 0, 64 * 1024 + 1);
+			if(do_fat_fsload(cmdtp, 0, argc, argv)){
+				printf("Could not find lks7688.cfg\n");
+			} else {
+				char *b = (char *)CFG_LOAD_ADDR;
+				char *s = b;
+				char *wifi_ssid = NULL, *wifi_key = NULL;
+				int save = 0;
+
+				NetBootFileXferSize=simple_strtoul(getenv("filesize"), NULL, 16);
+				b[NetBootFileXferSize] = '\0';
+				while (*s) {
+					char *end = strchr(s, '\n');
+					char *name = s;
+					char *val;
+
+					if (end) {
+						*end = '\0';
+						end++;
+					}
+
+					val = strchr(name, '=');
+					if (val) {
+						*val = '\0';
+						val++;
+						s = end;
+						if (!strcmp(name, "wifi_ssid")) {
+							wifi_ssid = val;
+						} else if (!strcmp(name, "wifi_key")) {
+							printf("-%s -> %s-\n", name, val);
+							wifi_key = val;
+						}
+					} else {
+						*s = '\0';
+					}
+				}
+
+				if (wifi_ssid && strlen(wifi_ssid) <= 32) {
+					printf("setting wifi_ssid to %s\n", wifi_ssid);
+					setenv("wifi_ssid", wifi_ssid);
+					save = 1;
+				}
+				if (wifi_key && strlen(wifi_key) >= 8 && strlen(wifi_key) < 64) {
+					printf("setting wifi_key to %s\n", wifi_key);
+					setenv("wifi_key", wifi_key);
+					save = 1;
+				}
+				if (save) {
+					char *wifi_seq = getenv("wifi_seq");
+					char buf[16];
+					int id = 0;
+
+					if (wifi_seq)
+						id = simple_strtoul(wifi_seq, NULL, 10);
+
+					sprintf(buf, "%d", id + 1);
+					setenv("wifi_seq", buf);
+					saveenv();
+				}
+			}
+
+			//reset            
+			do_reset(cmdtp, 0, argc, argv);
+			break;
+		case 'b':
+			printf("\n%d: System Load Uboot then write to Flash via USB Storage. \n", 5);
+
+			argc = 2;
+			argv[1] = "start";
+			do_usb(cmdtp, 0, argc, argv);
+			if( usb_stor_curr_dev < 0){
+				printf("No USB Storage found. Upgrade F/W failed.\n");
+				break;
+			}
+
+			argc= 5;
+			argv[1] = "usb";
+			argv[2] = "0";
+			sprintf(addr_str, "0x%X", CFG_LOAD_ADDR);
+			argv[3] = &addr_str[0];
+			argv[4] = "lks7688.ldr";
+			setenv("autostart", "no");
+			if(do_fat_fsload(cmdtp, 0, argc, argv)){
+				printf("Could not find lks7688.ldr\n");
+			} else {
+				NetBootFileXferSize=simple_strtoul(getenv("filesize"), NULL, 16);
+				if (NetBootFileXferSize > 0x30000) {
+					printf("lks7688.ldr is too big\n");
+				} else {
+					printf("writing lks7688.ldr to flash\n");
+					raspi_erase_write((char *)CFG_LOAD_ADDR, 0, NetBootFileXferSize);
+				}
+			}
 
 			//reset            
 			do_reset(cmdtp, 0, argc, argv);

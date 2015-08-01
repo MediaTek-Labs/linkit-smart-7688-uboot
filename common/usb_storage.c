@@ -179,10 +179,15 @@ block_dev_desc_t *usb_stor_get_dev(int index)
 	return &usb_dev_desc[index];
 }
 
-
+static int counter;
 void usb_show_progress(void)
 {
-	printf(".");
+	counter++;
+	if (counter > 10) {
+		printf(".");
+		smart7688_led_blink();
+		counter = 0;
+	}
 }
 
 /*********************************************************************************

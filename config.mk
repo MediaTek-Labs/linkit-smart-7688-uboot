@@ -22,6 +22,8 @@
 #PCI_MODE = PCI_FUNC
 #UARTF_MODE = UARTF_FUNC
 
+MT_HAS_16M_FLASH = OFF
+
 ######## RT2880 test function option configuration ##########################
 RALINK_DDR_CONTROLLER_OPTIMIZATION = OFF
 RALINK_CPU_AUTO_FREQUENCY = OFF
@@ -39,7 +41,7 @@ endif
 else
 RALINK_RW_RF_REG_FUN = ON
 endif
-RALINK_EHCI = OFF
+RALINK_EHCI = ON
 RALINK_OHCI = OFF
 MTK_XHCI = OFF
 RALINK_SSO_TEST_FUN = OFF
@@ -184,6 +186,10 @@ CPPFLAGS := $(DBGFLAGS) $(OPTFLAGS) $(RELFLAGS)		\
 	-fno-builtin -ffreestanding -nostdinc -isystem	\
 	$(gccincdir) -pipe $(PLATFORM_CPPFLAGS)
 #	-DROUTER100					\
+
+ifeq ($(MT_HAS_16M_FLASH),ON)
+CPPFLAGS += -DMT_HAS_16M_FLASH
+endif
 
 ifeq ($(UN_NECESSITY_U_BOOT_CMD_OPEN),ON)
 CPPFLAGS += -DRT2880_U_BOOT_CMD_OPEN
