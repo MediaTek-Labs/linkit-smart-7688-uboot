@@ -2397,7 +2397,9 @@ tRFCinit:
 	nop
 	bal		fill_icache
 	nop
-	li		sp, 0x89000000+0x1F00
+	li	t0, CFG_SDRAM_BASE + CFG_INIT_SP_OFFSET
+	la	sp, 0(t0)
+
 #endif	
 #endif	
 	la	t9, board_init_f
