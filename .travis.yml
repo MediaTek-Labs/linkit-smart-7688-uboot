@@ -10,6 +10,7 @@ install:
 - echo "INSTALL DEPS"
 
 script:
+- sudo tar xjf buildroot-gcc342.tar.bz2 -C /opt/
 - make
 
 deploy:
