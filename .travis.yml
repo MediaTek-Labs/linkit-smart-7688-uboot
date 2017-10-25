@@ -1,19 +1,20 @@
-language: cpp
+os: linux
+dist: trusty
 sudo: enabled
-#os: osx
+language: cpp
 
 before_install:
-- sudo apt-get update -qq
-- sudo apt-get install -qq make
+ - sudo apt-get update -qq
+ - sudo apt-get install -qq make
 
 install:
-- echo "INSTALL DEPS"
+ - echo "INSTALL DEPS"
 
 script:
-- sudo tar xjf buildroot-gcc342.tar.bz2 -C /opt/
-- make
+ - sudo tar xjf buildroot-gcc342.tar.bz2 -C /opt/
+ - make
 
-deploy:
-- echo "DEPLOY"
+#deploy:
+# - echo "DEPLOY"
 
 
