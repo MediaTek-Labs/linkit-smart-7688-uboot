@@ -6,7 +6,7 @@ language: cpp
 before_install:
  - sudo dpkg --add-architecture i386
  - sudo apt-get update -qq
- - sudo DEBIAN_FRONTEND=noninteractive apt-get install -qq  build-essential git zlib1g-dev libncurses-dev libssl-dev gawk unzip wget python subversion openssl file cmake doxygen mscgen graphviz plantuml wine curl ccache gettext tcl-dev tk-dev
+ - sudo DEBIAN_FRONTEND=noninteractive apt-get install -qq  build-essential git zlib1g-dev libncurses-dev libssl-dev gawk unzip wget python subversion openssl file cmake doxygen mscgen graphviz wine curl ccache gettext tcl-dev tk-dev
 
 install:
  - echo "INSTALL DEPS"
