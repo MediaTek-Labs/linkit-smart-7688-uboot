@@ -1,0 +1,18 @@
+language: cpp
+sudo: enabled
+#os: osx
+
+before_install:
+- sudo apt-get update -qq
+- sudo apt-get install -qq make
+
+install:
+- echo "INSTALL DEPS"
+
+script:
+- make
+
+deploy:
+- echo "DEPLOY"
+
+
